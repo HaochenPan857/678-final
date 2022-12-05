@@ -1,0 +1,292 @@
+---
+title: "678 Final Project Report"
+author:
+- name: Haochen Pan
+output:
+  html_document:
+    df_print: paged
+  pdf_document:
+    latex_engine: xelatex
+---
+
+## Part1 Abstract
+In the database recommended by Japanese animation, I found data about a large number of animation ratings, including numerical data such as animation scores, number of participants, and variables of more than 10 groups such as producer and source. This report will use multilevel modeling to analyze the how popularity and number of community fans and other variables affect the rating of anime (and some interesting conclusions/guess about anime-rating).
+The 10 page pdf is not enough for all graphs and analysis. There is a larger one in the github. 
+
+## Part2 Introduction
+The name of the data set from Kaggle is called "anime recommendation", which contains information on user preference data from 73,516 users on 12,294 anime. In the excel from the data, some useful variables can be used to find which variables can affect the rating of animes and how they exactly affect the rating. The following contents are the explanation of each variable. 
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+library(readr)
+anime <- read_csv("https://raw.githubusercontent.com/HaochenPan857/678-final/main/Anime_data1.csv")
+data1 <- anime[c("Anime_id","Title", "Type", "Producer", "Studio", "Rating", "ScoredBy", "Popularity","Members","Episodes","Source","Aired")]
+data = na.omit(data1)
+library(ggplot2)
+library(dplyr)
+library(gridExtra)
+library(ggthemes)
+library(RColorBrewer)
+library(grid)
+library(gridExtra)
+library(ggrepel)
+library(tidyr)
+library(plotly)
+library(corrplot)
+library(tidyverse)
+library(sf)
+library(ggpubr)
+library(knitr)
+library(coefplot)
+library(plotrix)
+library(cluster)
+library(factoextra)
+library(tidytext)
+library(tm)
+library(stm)
+library(reshape2)
+library(wordcloud)
+library(RColorBrewer)
+library(MASS)
+library(lme4)
+library(lattice)
+```
+
+Anime_id: myanimelist.net's unique id identifying an anime.
+Title: full name of anime.
+Type: Movie, TV, Special, etc.
+Producer: Different producer companies that produce the anime.
+Studio: The creator company of anime.
+Rating: Average rating out of 10 for this anime.
+ScoreBy: Number of people who rate the anime.
+Popularity: The popularity of the anime(the lower number means more famous).
+Members: Number of community fans that are in this anime's
+"group".
+Episodes: How many episodes in this show. (1 if movie).
+Source: The source of the anime, including Manga, original, etc.
+Aired: The date that the anime start to show.
+
+```{r, echo=FALSE}
+data2 <- data %>%
+  mutate(Source = str_replace(Source,"[[0-9]]+(?!-)","Undicided"))
+ggplot(data = data2)+
+  geom_bar(mapping = aes(x = Source, fill= Source)) +
+   scale_x_discrete(breaks = seq(0, 100, by = 5)) +
+  ggtitle("figure1:Number of different sources") +
+  xlab("Sources") + ylab("Number of sources")
+```
+
+There are many variables belongs to the least 10 groups that’s “Interesting” to compare. For example, figure 2 shows the different types of sources.
+
+## Part3 Methods
+
+### Data Cleaning
+In the uploading part, I delete the missing data and NAs.
+
+### EDA
+Before the linear regression and modeling, I first use some variables mentioned above to make graphs to predict which methods are more useful in the next parts. 
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+sample_1 = sample_n(data, 100)
+ggplot(data = sample_1, mapping = aes(x = Rating, y = Popularity)) +
+  geom_point(alpha = 0.5, aes(size = Members , color=Source)) +
+   scale_x_discrete(breaks = seq(0, 100, by = 5)) +
+  ggtitle("figure2:Relationship between rating and Members/Source") +
+  xlab("The rating of animes") + ylab("Popularity") # The less of the Popularity means the anime is more famous
+```
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+sample_2 = sample_n(data, 150)
+ggplot(data = sample_2, aes(x = Rating, y = Members)) +
+  geom_point(data = sample_2, size = 1.0, alpha = 1.0, aes(color= Type)) +
+  scale_x_discrete(breaks = seq(0, 100, by = 5))  +
+  ggtitle("figure3:Relationship between rating and Members/type") +
+  xlab("Rating of the animes") + ylab("Members")
+```
+
+In figure 3 and figure 4, I randomly select 100/150 of the animes from the data to see the changes of ratings and how other variables can affect them. In a short conclusion, some sources like manga, some types like TV, more popularity and more members seems to have a higher rating in the graph. 
+
+### Linear Model
+
+First, I use linear model to analysis how Popularity/Members affect Rating
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+M1 = lm(Rating ~ log(Popularity)+ log(Members)+ log(ScoredBy), data = sample_2)
+summary(M1)
+coef(M1)
+kable(confint(M1), digits = 2)
+plot(M1)
+coefplot(M1)
+```
+According to the residual plot, our model complies with the assumptions of normality and constant variance, so there is no issue about violating the model assumptions. The coefficient for log(Popularity), log(Members),log(ScoredBy) is the predicted difference in Rating corresponding to a 1 unit difference if other variables equal to zero. Thus, the estimated predictive difference per unit of these variables is 0.009475,0.267762, 0.040018 Increase. 
+
+
+### Multilevel Modeling
+Then, based on the requirement, i use the multilevel model to analysis and predict the data. 
+First, I check the distributions by type/source. 
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+data2 %>% 
+  group_by(Source) %>% 
+  summarise(mean = mean(Rating, na.rm = T), 
+            SD = mean(Rating, na.rm = T), 
+            miss = mean(is.na(Rating))) %>% 
+  mutate_if(is.numeric, ~round(., 2)) %>% 
+  print(n = 50)
+data2 %>%
+  ggplot(aes(Rating)) + 
+  geom_density() +
+  facet_wrap(~Source)
+data2 %>%
+  ggplot(aes(Rating)) + 
+  geom_density() +
+  facet_wrap(~Type)
+```
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+mu2 <- lmer(Rating ~ 1 + (1 |Type),REML= FALSE,
+          data = data2)
+summary(mu2)
+data2$mu2 <- predict(mu2)
+data2 %>% 
+  ggplot(aes(Members, mu2, color = Type, group = Type)) + 
+  geom_smooth(se = F, method = lm) +
+  theme_bw() +
+  theme(axis.text.x = element_blank(),
+        axis.ticks = element_blank()) +
+  ggtitle("figure4:Prediction for Rating based on Type and Members")+
+  labs(x = "", y = "change for Rating", color = "Type")
+qqmath(ranef(mu2, condVar = TRUE))
+
+mu5 <- lmer(Rating ~ 1 + (1 |Source),REML= FALSE,
+          data = data2)
+summary(mu5)
+data2$mu5 <- predict(mu5)
+data2 %>% 
+  ggplot(aes(Members, mu5, color = Source, group = Source)) + 
+  geom_smooth(se = F, method = lm) +
+  theme_bw() +
+  theme(axis.text.x = element_blank(),
+        axis.ticks = element_blank()) +
+  ggtitle("figure5:Prediction for Rating based on Source and Members")+
+  labs(x = "", y = "change for Rating", color = "Source")
+qqmath(ranef(mu5, condVar = TRUE))
+```
+Each Type/Source is able to have a different increasing/decreasing of rating. Different Type and Source will affect the changing of rating.
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+mu3 <- lmer(Rating ~ 1 + Members + (1 |Type),REML= FALSE,
+          data = data2)
+summary(mu3)
+data2$mu3 <- predict(mu3)
+data2 %>%
+  ggplot(aes(Members, mu3, color = Type, group = Type)) + 
+  geom_smooth(se = F, method = lm) +
+  theme_bw() +
+  ggtitle("figure6:Prediction in MLM model")+
+  labs(x = "Members", y = "change for Rating", color = "Type")
+mu6 <- lmer(Rating ~ 1 + Members + (1 |Source),REML= FALSE,
+          data = data2)
+summary(mu6)
+data2$mu6 <- predict(mu6)
+data2 %>%
+  ggplot(aes(Members, mu6, color = Source, group = Source)) + 
+  geom_smooth(se = F, method = lm) +
+  theme_bw() +
+  ggtitle("figure7:Prediction in MLM model2")+
+  labs(x = "Members", y = "change for Rating", color = "Source")
+
+
+```
+Here we see that as Members of group increases by 1 unit the rating increases by 3.072e-06 and 2.932e-06. We also notice that the random effects are smaller compared to the previous model. This indicates that number of members for group is explaining some variation.
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+mu4 <- lmer(Rating ~ 1 + Members + (1 + Members |Type),REML= FALSE,
+          data = data2)
+summary(mu4)
+data2$mu4 <- predict(mu4)
+data2 %>%
+  ggplot(aes(Members, mu4)) + 
+  geom_smooth(se = F, method = lm, size= 1) +
+  stat_smooth(aes(color = Type, group = Type),
+              geom = "line", alpha = 0.4, size = 1)+
+  theme_bw()+
+  guides(color = F)+
+   ggtitle("figure8:Prediction in random slope model")+
+  labs(x = "Members", y = "change in rating", color = "Type")
+qqmath(ranef(mu4, condVar = TRUE))
+
+mu7 <- lmer(Rating ~ 1 + Members + (1 + Members |Source),REML= FALSE,
+          data = data2)
+summary(mu7)
+qqmath(ranef(mu7, condVar = TRUE))
+```
+We see that there is a average effect that is represented by the fixed effect (1.237e-05) but each type is allowed to have its own line. Also, Source is no longer useful in this visualization.
+
+```{r,r,echo=FALSE, message=FALSE, warning=FALSE}
+coefs_mu4 <- coef(mu4)
+coefs_mu4$Type %>%
+  mutate(Type = rownames(coefs_mu4$Type))  %>% 
+  ggplot(aes(Members, `(Intercept)`, label = Type)) + 
+  geom_point() + 
+  geom_smooth(se = F, method = lm) +
+  geom_label(nudge_y = 0.15, alpha = 0.5) +
+  theme_bw() +
+  ggtitle("figure10 :effect of members and rating")+
+  labs(x = "Slope", y = "Intercept")
+```
+In figure The graphs shows that we can divide the types into 3 parts. TV and Movie have most members and high increasing in rating but low effect of members to outcome. The Music has low support in rating but members for music has strong effect. The interpret ion will be written in the result/discussion part.
+
+### K-means algorithm
+For this part, I want to use k-means to cluster observations and want observations in the same group to be similar and observations in different groups to be dissimilar.
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+data3 <- data2[c("Anime_id","Rating","Members","Popularity")]
+data3 <- sample_n(data3,40)
+data3 <- na.omit(data3)
+data3 <- data3[!is.na(as.numeric(data3$Rating)),]
+data3 <- data3[!is.na(as.numeric(data3$Popularity)),]
+data3 <- data3[!is.na(as.numeric(data3$Members)),]
+data3 <- data3[!is.na(as.numeric(data3$Anime_id)),]
+data3 <- scale(data3)
+distance <- get_dist(data3)
+fviz_dist(distance, gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"))
+```
+
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+k <- kmeans(data3, centers = 2, nstart = 40)
+str(k)
+k
+fviz_cluster(k, data = data3)
+```
+
+### Word Could and Tpoic Modeling
+Finally, I tried what I learn in 615 to analysis the non-numerical data.
+```{r,echo=FALSE, message=FALSE, warning=FALSE}
+word_data <- anime[c("Genre")]
+word_data <- na.omit(word_data)
+word_data_df <- tibble(word_data)
+word_data_df %>% 
+  mutate(Genre_number = row_number()) -> word_data_df
+word_data_df <- word_data_df %>%
+  unnest_tokens(word, Genre, to_lower = FALSE)%>% anti_join(stop_words)
+word_data_df %>% 
+count(word, sort = TRUE)
+#plot frequencies
+word_data_df %>%
+  count(word, sort = TRUE) %>%
+  filter( n>1000) %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(n, word)) +
+  geom_col() +
+  labs(y = NULL,
+       title = "Word Frequency from Genre") +
+  xlab("Count of word")+
+  ylab("Most frequent word")
+world_cloud <- wordcloud(words = word_data$Genre,max.words = 150, min.freq = 1, random.order = FALSE,rot.per = 0.35, colors=brewer.pal(8, "Dark2"))
+```
+## Part4 Results
+Based on the modeling above, there results are:
+1. The estimated on numerical variables is 0.009475,0.267762, 0.040018 per unit increase; The linear model works for the three variables, but since the smaller popularity value means more popularity rank, its effect to rating is much smaller than members and scored people.
+2. Multilevel modeling distribution works well on type/source, for the members value as the x-label, some specific type/source are more effective in rating, like OVA, Special/ Manga and game.The random effects are changing for different model. This indicates that number of members for group is explaining some variation.
+3. There are some words that show high frequency in the genre part, which means high rating animes are often related to some of the words. 
+4. There are limit of space for this part. The full figures can be seen in another pdf. 
+
+## Part5 Discussion
+Based on the results, especially for the prediction part, the members and popularity are the most 2 important numerical variables that affect the rating. More popularized and discussed anime are easier to get rating higher than average. However, the groups of type and source may be different in different situations. For example, TV type of animes have more members to discuss, but the effect to increase the rating is not that important. In the future, the type of animes will still be TV-mained, but if more people start to become members of other types, there rating will increase faster than TV. Also, it will be harder to get higher rating when evaluating the date of anime(no space to show in the pdf) and about the genre, animes about comedy, action and advanture will still be the main topics for anime. 
